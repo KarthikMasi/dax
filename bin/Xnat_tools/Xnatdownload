@@ -125,10 +125,20 @@ def get_resources_list(object_dict, resources_list):
     :return: None if empty, 'all' if all selected, list otherwise
     """
     # Get list of resources' label
+
     if resources_list == 'all':
-        res_list = object_dict['resources']
+        if object_dict.has_key("resources"):
+            res_list = object_dict['resources']
+        else:
+            res_list = []
+            resources = XNAT.select('/project/{project}/subject/{subject}/experiment/{experiment}/assessor/{assessor}/resources'.format(project=object_dict['project_id'],
+                                                                                                                  subject=object_dict['subject_label'],
+                                                                                                                  experiment=object_dict['session_label'],
+                                                                                                                  assessor=object_dict['label']))
+            for resource in resources:
+                res_list.append(resource.label())
     else:
-        res_list = resources_list
+        res_list=resources_list
     return res_list
 
 
@@ -255,10 +265,13 @@ given as a parameter or it does not exist on XNAT.')
         # list of scans and assessors for the all the project cat together.
         for project in projects_list:
             if OPTIONS.scantype:
-                scans_list.extend(XnatUtils.list_project_scans(XNAT, project))
+                scans_list.extend(XNAT.get_project_scans(project))
             if OPTIONS.assessortype:
                 asses_list.extend(XnatUtils.list_project_assessors(
                     XNAT, project))
+         #   if OPTIONS.subject:
+          #      scans_list.extend(XNAT.get_project_scans(project))
+           #     asses_list.extend(XnatUtils.list_assessors(XNAT, project, get_option_list(OPTIONS.subject), get_option_list(OPTIONS.session)))
         # Read previous report
         scans_dl_dict, asses_dl_dict, last_dl_date, old_rows = read_report()
         if OPTIONS.overwrite:
@@ -450,7 +463,7 @@ def check_projects(projects_list):
 this project from the list.' % (project))
             projects_list.remove(project)
         else:
-            if not len(XnatUtils.list_subjects(XNAT, project)) > 0:
+            if not len(XNAT.get_subjects(project)) > 0:
                 LOGGER.info("WARNING: You don't access to the project: %s. \
 Remove this project from the list." % (project))
                 projects_list.remove(project)
@@ -640,6 +653,8 @@ def download_scan(directory, scan_dict, resources_list, row, last_dl_date):
     try:
         scan_obj = XnatUtils.get_full_object(XNAT, scan_dict)
     except KeyError:
+        # TODO: BenM/xnatutils refactor/this shouldn't be hit under any
+        # circumstances; figure out if it is still needed and, if not, remove
         scan_obj = XNAT.select('/project/{project}/subject/{subject}/experiment/{experiment}/scan/{scan}'. format(project=scan_dict['project_id'],
                                                                                                                   subject=scan_dict['subject_label'],
                                                                                                                   experiment=scan_dict['session_label'],
@@ -807,6 +822,7 @@ def dl_files(res_obj, directory):
     :param directory: local download directory for the data
     :return: None
     """
+    # TODO: BenM/xnatutils refactor/appears to me a lot of unnecessary fetching / refetching here
     # if more than one file:
     if len(res_obj.files().get()) > 1:
         # create a dir with the resourcename:
@@ -857,7 +873,10 @@ def download_specific_scan():
     if OPTIONS.resourcesS:
         LOGGER.info('Selected Scan: %s' % (OPTIONS.selectionScan))
         # Variables:
-        scan_path = os.path.join(DIRECTORY, OPTIONS.selectionScan)
+        if not OPTIONS.oneDir:
+            scan_path = os.path.join(DIRECTORY, OPTIONS.selectionScan)
+        else:
+            scan_path = DIRECTORY
         scan_resources = get_option_list(OPTIONS.resourcesS)
         qualities = get_option_list(OPTIONS.qualities)
         # Get scan obj dict:
@@ -876,7 +895,8 @@ def download_specific_scan():
                                       scan_dict['subject_label'],
                                       scan_dict['session_label'],
                                       scan_dict['ID']])
-                scan_path = os.path.join(DIRECTORY, sub_dir)
+                if not OPTIONS.oneDir:
+                    scan_path = os.path.join(DIRECTORY, sub_dir)
                 download_scan(scan_path, scan_dict, scan_resources,
                               None, last_dl_date=None)
     else:
@@ -892,7 +912,10 @@ def download_specific_assessor():
     if OPTIONS.resourcesA:
         LOGGER.info('Selected Processor: %s' % (OPTIONS.selectionAssessor))
         # Variables:
-        assessor_path = os.path.join(DIRECTORY, OPTIONS.selectionAssessor)
+        if not OPTIONS.oneDir:
+            assessor_path = os.path.join(DIRECTORY, OPTIONS.selectionAssessor)
+        else:
+            assessor_path = DIRECTORY
         assessors_resources = get_option_list(OPTIONS.resourcesA)
         status = get_option_list(OPTIONS.status)
         # Get assessor obj dict:
@@ -913,7 +936,8 @@ def download_specific_assessor():
                 jobstatus = assessor_obj.attrs.get(
                     'proc:genProcData/procstatus')
             if not status or (status and jobstatus in status):
-                assessor_path = os.path.join(DIRECTORY, assessor_dict['label'])
+                if not OPTIONS.oneDir:
+                    assessor_path = os.path.join(DIRECTORY, assessor_dict['label'])
                 out_reslist = get_resources_list(
                     assessor_dict, assessors_resources)
                 for rname in out_reslist:

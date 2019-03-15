@@ -1,3 +1,6 @@
+# Gedit backup files
+*.py~
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -52,4 +55,7 @@ coverage.xml
 
 # Sphinx documentation
 docs/_build/
+
+# Test directory
+test/log_test_job_runner.txt
 

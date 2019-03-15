@@ -175,8 +175,8 @@ set properly.\nTraceback: %s' % err
     if args.projects:
         print('INFO: Querying XNAT to get assessors for all the projects.')
         if args.projects == 'all':
-            _uri = XnatUtils.PROJECTS_URI
-            projects = [_p['ID'] for _p in xnat._get_json(_uri)]
+            #_uri = XnatUtils.PROJECTS_URI
+            projects = [_p['ID'] for _p in xnat.get_projects()]
         elif args.projects:
             projects = args.projects.split(',')
         else:
@@ -186,42 +186,39 @@ set properly.\nTraceback: %s' % err
         for project in projects:
             sys.stdout.write("  * Project: %s\n" % (project))
             assessors_list = XnatUtils.list_project_assessors(xnat, project)
-            if not assessors_list:
-                err = "You don't have access to the project: %s" % project
-                raise XnatToolsUserError(__exe__, err)
             assessors.extend(assessors_list)
 
-    # Filter assessors:
-    assessors = filter_assessors(args, assessors, has_fs_datatypes,
-                                 full_project=True if projects else False)
+            #Filter assessors:
+            assessors =filter_assessors(xnat,project,args, assessors, has_fs_datatypes,
+                                               full_project=True if projects else False)
 
-    # Print number of assessors found:
-    if projects and assessors:
-        print('INFO: Number of XNAT assessors found after filtering:')
-        if assessors:
-            _format = '| %*s | %*s |'
-            _sep = ' ---------------------------------------------'
-            print(_sep)
-            print(_format % (-20, 'Project ID', -20, 'Number of Assessors'))
-            print(_sep)
-            for project in projects:
-                print(_format % (-20, project,
-                                 -20, len([_a for _a in assessors
-                                           if _a['project_id'] == project])))
-            print('%s\n' % _sep)
+            # Print number of assessors found:
+            if projects and assessors:
+                print('INFO: Number of XNAT assessors found after filtering:')
+                if assessors:
+                    _format = '| %*s | %*s |'
+                    _sep = ' ---------------------------------------------'
+                    print(_sep)
+                    print(_format % (-20, 'Project ID', -20, 'Number of Assessors'))
+                    print(_sep)
+                    for project in projects:
+                        print(_format % (-20, project,
+                                         -20, len(assessors)))
+                    print('%s\n' % _sep)
 
     return assessors
 
 
-def filter_assessors(args, assessors, has_fs_datatypes=False,
+def filter_assessors(xnat,project,args, assessors, has_fs_datatypes=False,
                      full_project=False):
     """
     Function to filter the list of assessors to keep the ones respecting
-    the options specified by the user.
+    the options specified by the user. Multiple variables used in method
+    to avoid overwrite while looping.
 
     :param args: arguments from argparse
     :param assessors: list of assessors to filter
-    :param has_fs_datatypes: if FS datatypes installed on XNAT
+    :param has_fs_datatypes: if FS datatypes installed on XNAT/
     :param full_project: checking full project
     :return: list of assessors dictionaries filtered
     """
@@ -234,8 +231,9 @@ def filter_assessors(args, assessors, has_fs_datatypes=False,
     elif args.init:
         former_status = task.NO_DATA
     elif args.rerundiskq:
-        former_status = None
+        former_status = task.JOB_FAILED
 
+    assess = list()
     proctypes = utils.get_option_list(args.proctypes)
     proctypes = edit_list_procs(proctypes, has_fs_datatypes)
 
@@ -247,23 +245,82 @@ def filter_assessors(args, assessors, has_fs_datatypes=False,
         assessors = XnatUtils.filter_list_dicts_regex(
             assessors, 'subject_label', args.subjects, args.full_regex)
 
-    if args.sessions and args.sessions != 'all':
-        assessors = XnatUtils.filter_list_dicts_regex(
-            assessors, 'session_label', args.sessions, args.full_regex)
+    if args.sessions:
+        if args.sessions=='all':
+            sessions = XnatUtils.list_experiments(xnat,project)
+            for session in sessions:
+                assess.append(XnatUtils.filter_list_dicts_regex(assessors, 'session_label', session['session_label'], args.full_regex))
+        elif args.sessions!='all':
+            sessions = utils.get_option_list(args.sessions)
+            for session in sessions:
+                assess.append(XnatUtils.filter_list_dicts_regex(assessors, 'session_label', session, args.full_regex))
+        assessors = list_flatten(assess)
 
-    if proctypes and proctypes != 'all':
-        assessors = XnatUtils.filter_list_dicts_regex(
-            assessors, 'proctype', proctypes, args.full_regex)
+        assess1 = list()
+        assess_carry_1 = list()
 
-    if former_status and former_status != 'all':
-        if args.qcstatus:
-            field_name = 'qcstatus'
-        else:
-            field_name = 'procstatus'
-        assessors = XnatUtils.filter_list_dicts_regex(
-            assessors, field_name, former_status, args.full_regex)
+        if (proctypes and proctypes != 'all' ):
+            assess1.append(XnatUtils.filter_list_dicts_regex(
+                    assessors, 'proctype', proctypes, args.full_regex))
 
+            for assess in assess1:
+                if(len(assess) > 1):
+                    for asse in assess:
+                        assess_carry_1.append(asse)
+                else:
+                    assess_carry_1.append(assess)
+
+            assess_carry_1 = list_flatten(assess_carry_1)
+            assessors = assess_carry_1
+
+        if ((former_status and former_status != 'all') or args.rerundiskq):
+            if args.rerundiskq:
+                former_status='JOB_FAILED'
+                field_name='procstatus'
+            elif args.qcstatus:
+                field_name = 'qcstatus'
+            else:
+                field_name = 'procstatus'
+            assessors = XnatUtils.filter_list_dicts_regex(
+                assessors, field_name, former_status, args.full_regex)
+            assessors = list_flatten(assessors)
+
+
+    if not args.sessions:
+        if ((proctypes and proctypes != 'all' )or args.rerundiskq):
+            if args.rerundiskq:
+                proctypes = 'NEED_INPUTS'
+            assessors = XnatUtils.filter_list_dicts_regex(
+                assessors, 'proctype', proctypes, args.full_regex)
+
+        if ((former_status and former_status != 'all') or args.rerundiskq):
+            if args.rerundiskq:
+                former_status='JOB_FAILED'
+            if args.qcstatus:
+                field_name = 'qcstatus'
+            else:
+                field_name = 'procstatus'
+            assessors = XnatUtils.filter_list_dicts_regex(
+                assessors, field_name, former_status, args.full_regex)
     return assessors
+
+def list_flatten(l, assessor=None):
+    """
+    Method used to flatten a list.
+    :param l: list<list>
+    :param assessor: empty list
+    :return: list object
+    """
+    if assessor is None:
+        #initialize with empty list
+        assessor = []
+
+    for i in l:
+        if isinstance(i, list):
+            list_flatten(i, assessor)
+        else:
+            assessor.append(i)
+    return assessor
 
 
 def delete_assr_resource(assessor_obj, resource):
@@ -397,10 +454,12 @@ def set_need_inputs_proctype(xnat, assessor, need_inputs, full_regex=False):
                 set_proc_status(assessor_obj, task.NEED_INPUTS)
 
             li_assessors = XnatUtils.list_assessor_out_resources(
-                xnat, a_linked_dict['project_id'],
+                xnat,
+                a_linked_dict['project_id'],
                 a_linked_dict['subject_id'],
                 a_linked_dict['session_id'],
                 a_linked_dict['label'])
+
             for resource in li_assessors:
                 delete_assr_resource(assessor_obj, resource['label'])
 
@@ -514,7 +573,8 @@ def set_status_assessor(xnat, assessor, status,
                     delete_assr_resource(assessor_obj, resource)
             else:
                 resources = XnatUtils.list_assessor_out_resources(
-                    xnat, assessor['project_id'], assessor['subject_label'],
+                    xnat,
+                    assessor['project_id'], assessor['subject_label'],
                     assessor['session_label'], assessor['label'])
                 for resource in resources:
                     delete_assr_resource(assessor_obj, resource['label'])
@@ -557,8 +617,6 @@ def run_xnat_switch_process_status(args):
 required by dax. Please install them. Check https://github.com/VUIIS/dax wiki.'
             raise XnatToolsUserError(__exe__, err)
         has_fs_datatypes = XnatUtils.has_fs_datatypes(xnat)
-
-        # get assessors to switch from options:
         assessors = get_assessors(xnat, args, has_fs_datatypes)
 
         # Switch status for assessors:

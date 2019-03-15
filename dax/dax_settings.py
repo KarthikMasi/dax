@@ -507,7 +507,7 @@ class DAX_Settings(object):
         """
         return self.get('cluster', 'job_extension_file')
 
-    def get_job_template(self):
+    def get_job_template(self, filepath=None):
         """Get the job_template value from the cluster section.
 
         NOTE: This should be a relative path to a file up a directory
@@ -516,7 +516,12 @@ class DAX_Settings(object):
         :raise: OSError if the field is empty or if the file doesn't exist
         :return: Template class of the file containing the command
         """
-        filepath = self.get('cluster', 'job_template')
+        if filepath is None:
+            filepath = self.get('cluster', 'job_template')
+        elif not os.path.isabs(filepath):
+            # If only filename, we assume it is same folder as default
+            def_filepath = self.get('cluster', 'job_template')
+            filepath = os.path.join(os.path.dirname(def_filepath), filepath)
         if filepath is None:
             return ''
         if filepath.startswith('~/'):
@@ -593,6 +598,14 @@ class DAX_Settings(object):
         """
         return self.get('cluster', 'launcher_type')
 
+    def get_upload_threads(self):
+        """
+        Get the upload threads from the cluster
+
+        :return: number of upload threads
+        """
+        return self.get('cluster', 'upload_threads')
+
     def get_api_url(self):
         """Get the api_url value from the dax_manager section.
 
@@ -607,6 +620,25 @@ class DAX_Settings(object):
         """
         return self.get('dax_manager', 'api_key_dax')
 
+    def get_use_reference(self):
+        """
+        Get use_reference from the cluster
+
+        :return: True or False
+        """
+        _ur = self.get('cluster', 'use_reference')
+        if _ur and (_ur.lower().startswith('y') or _ur.lower().startswith('t')):
+            return True
+        else:
+            return False
+
+    def get_reference_dir(self):
+        """Get the reference_dir value from the cluster section.
+
+        :return: String of the reference_dir value, None if empty
+        """
+        return self.get('cluster', 'reference_dir')
+
     @staticmethod
     def read_file_and_return_template(filepath):
         """Reads a a file and returns the string as a string Template.
@@ -617,8 +649,10 @@ class DAX_Settings(object):
         """
         with open(filepath, 'r') as f:
             data = f.read()
-        if data is None or data == '':
-            return ''
+
+        if data is None:
+            data = ''
+
         return Template(data)
 
     @staticmethod
